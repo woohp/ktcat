@@ -1,0 +1,44 @@
+[project]
+dependencies = []
+description = "Add your description here"
+name = "ktcat"
+readme = "README.md"
+requires-python = ">=3.13"
+version = "0.1.0"
+
+[project.scripts]
+ktcat = "ktcat:main"
+
+[project.optional-dependencies]
+dev = [
+    "mypy >= 1.19",
+    "ruff >= 0.4.10",
+]
+
+[build-system]
+build-backend = "uv_build"
+requires = ["uv_build>=0.9.21,<0.10.0"]
+
+[tool.mypy]
+allow_any_generics = false
+allow_untyped_defs = false
+check_untyped_defs = true
+extra_checks = true
+ignore_missing_imports = true
+no_implicit_optional = true
+python_version = "3.13"
+strict_equality = true
+warn_redundant_casts = true
+warn_unreachable = true
+warn_unused_ignores = true
+
+[tool.ruff]
+indent-width = 4
+line-length = 120
+preview = true
+target-version = "py313"
+
+[tool.ruff.lint]
+ignore = ["B028", "B905", "C408", "E203", "SIM102", "SIM108"]
+preview = true
+select = ["B", "C4", "E", "F", "FURB", "I", "PT", "Q", "SIM", "U", "YTT"]
