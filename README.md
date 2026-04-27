@@ -17,5 +17,4 @@ Display images in a Kitty-compatible terminal.
 
 ## Notes
 
-- The package uses a `src` layout; the implementation lives in `src/ktcat/__init__.py`.
-- The installed CLI entrypoint is `ktcat`; `python -m ktcat` is not supported.
+- The package uses a `src` layout; `src/ktcat/__main__.py` forwards `python -m ktcat` to the same `main()` entrypoint used by the installed `ktcat` console script.
