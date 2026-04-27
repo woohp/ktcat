@@ -11,8 +11,8 @@ ktcat = "ktcat:main"
 
 [project.optional-dependencies]
 dev = [
-    "mypy >= 1.19",
-    "ruff >= 0.4.10",
+    "mypy >= 1.20",
+    "ruff >= 0.15.0",
 ]
 
 [build-system]
