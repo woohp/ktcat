@@ -15,24 +15,25 @@ def ktcat(image: Any) -> None:
                Supports shapes [H, W], [H, W, C], and [C, H, W].
                If values are floats, they are assumed to be in [0, 1] and are scaled to [0, 255].
     """
-    b64_data = base64.b64encode(_to_png_bytes(image)).decode("ascii")
+    _write_kitty_png(_to_png_bytes(image))
 
-    # Kitty escape sequence chunking (4096 bytes per chunk)
-    chunk_size = 4096
-    chunks = [b64_data[i : i + chunk_size] for i in range(0, len(b64_data), chunk_size)]
 
-    for i, chunk in enumerate(chunks):
-        is_last = i == len(chunks) - 1
+def _write_kitty_png(png_bytes: bytes) -> None:
+    raw_chunk_size = 3072  # Encodes to exactly 4096 base64 bytes.
+
+    for offset in range(0, len(png_bytes), raw_chunk_size):
+        encoded = base64.b64encode(png_bytes[offset : offset + raw_chunk_size]).decode("ascii")
+        is_last = offset + raw_chunk_size >= len(png_bytes)
         m = "0" if is_last else "1"
 
-        if i == 0:
+        if offset == 0:
             # a=T: Action=Transmit and display
             # f=100: Format=PNG
             header = f"\033_Ga=T,f=100,m={m};"
         else:
             header = f"\033_Gm={m};"
 
-        sys.stdout.write(header + chunk + "\033\\")
+        sys.stdout.write(header + encoded + "\033\\")
 
     sys.stdout.write("\n")
     sys.stdout.flush()
@@ -64,11 +65,12 @@ def _to_png_bytes(data: Any) -> bytes:
     height, width = img.shape[:2]
 
     # PNG scanlines are prefixed with a filter byte. We always use filter type 0.
-    scanlines = []
+    scanlines = BytesIO()
     row_view = img.reshape(height, -1)
     for row in row_view:
-        scanlines.append(b"\x00" + row.tobytes())
-    raw = b"".join(scanlines)
+        scanlines.write(b"\x00")
+        scanlines.write(row.tobytes())
+    raw = scanlines.getvalue()
 
     return b"".join([
         b"\x89PNG\r\n\x1a\n",
@@ -117,6 +119,7 @@ def _normalize_array(img: Any) -> Any:
         img = np.clip(img, 0, 1)
         img = (img * 255).astype(np.uint8)
     elif img.dtype != np.uint8:
+        img = np.clip(img, 0, 255)
         img = img.astype(np.uint8)
 
     return np.ascontiguousarray(img)
