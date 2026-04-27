@@ -1,9 +1,9 @@
 import base64
+import struct
 import sys
+import zlib
 from io import BytesIO
 from typing import Any
-
-from PIL import Image
 
 
 def ktcat(image: Any) -> None:
@@ -15,13 +15,7 @@ def ktcat(image: Any) -> None:
                Supports shapes [H, W], [H, W, C], and [C, H, W].
                If values are floats, they are assumed to be in [0, 1] and are scaled to [0, 255].
     """
-    # Convert to PIL Image
-    pil_img = _to_pil(image)
-
-    # Save to PNG buffer
-    with BytesIO() as buf:
-        pil_img.save(buf, format="PNG")
-        b64_data = base64.b64encode(buf.getvalue()).decode("ascii")
+    b64_data = base64.b64encode(_to_png_bytes(image)).decode("ascii")
 
     # Kitty escape sequence chunking (4096 bytes per chunk)
     chunk_size = 4096
@@ -44,20 +38,55 @@ def ktcat(image: Any) -> None:
     sys.stdout.flush()
 
 
-def _to_pil(data: Any) -> Image.Image:
-    """Converts various image formats to a PIL Image."""
-    from PIL import Image
+def _to_png_bytes(data: Any) -> bytes:
+    """Converts supported image inputs into PNG bytes."""
 
-    # 1. Already a PIL Image
+    # If Pillow is available and the input is already a PIL image, let Pillow encode it.
     if _isinstance(data, "PIL.Image", "Image"):
-        return data
+        with BytesIO() as buf:
+            data.save(buf, format="PNG")
+            return buf.getvalue()
 
-    # 2. Handle Torch Tensors
+    img = _to_array(data)
+
+    if img.ndim == 2:
+        color_type = 0
+    else:
+        channel_count = img.shape[2]
+        if channel_count == 3:
+            color_type = 2
+        elif channel_count == 4:
+            color_type = 6
+        else:
+            raise ValueError(f"Unsupported channel count: {channel_count}. Expected 3 or 4.")
+
+    img = _normalize_array(img)
+    height, width = img.shape[:2]
+
+    # PNG scanlines are prefixed with a filter byte. We always use filter type 0.
+    scanlines = []
+    row_view = img.reshape(height, -1)
+    for row in row_view:
+        scanlines.append(b"\x00" + row.tobytes())
+    raw = b"".join(scanlines)
+
+    return b"".join([
+        b"\x89PNG\r\n\x1a\n",
+        _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)),
+        _png_chunk(b"IDAT", zlib.compress(raw)),
+        _png_chunk(b"IEND", b""),
+    ])
+
+
+def _to_array(data: Any) -> Any:
+    """Converts supported image formats to a numpy array."""
+    np = _require_numpy()
+
+    if _isinstance(data, "PIL.Image", "Image"):
+        return np.array(data)
+
     if _isinstance(data, "torch", "Tensor"):
         data = data.detach().cpu().numpy()
-
-    # 3. Handle Numpy Arrays (or things that can be converted to them)
-    import numpy as np
 
     if not isinstance(data, np.ndarray) and hasattr(data, "__array__"):
         data = np.array(data)
@@ -68,26 +97,47 @@ def _to_pil(data: Any) -> Image.Image:
             # Grayscale [H, W]
             pass
         elif img.ndim == 3:
-            # Decide between [C, H, W] and [H, W, C]
-            # If the first dimension is 1, 3, or 4 and the last is not, it's likely CHW
             if img.shape[0] in (1, 3, 4) and img.shape[2] not in (1, 3, 4):
                 img = np.transpose(img, (1, 2, 0))
 
-            # Now it should be [H, W, C]
-            # Handle [H, W, 1] -> [H, W] for PIL
             if img.shape[2] == 1:
                 img = img.squeeze(2)
         else:
             raise ValueError(f"Unsupported array shape: {img.shape}. Expected 2D or 3D.")
 
-        # Normalize float to uint8 [0, 255]
-        if img.dtype.kind == "f":
-            img = (img * 255).astype(np.uint8)
+        return img
 
-        return Image.fromarray(img)
-
-    # 4. Fallback or error
     raise TypeError(f"Unsupported image type: {type(data)}")
+
+
+def _normalize_array(img: Any) -> Any:
+    np = _require_numpy()
+
+    if img.dtype.kind == "f":
+        img = np.clip(img, 0, 1)
+        img = (img * 255).astype(np.uint8)
+    elif img.dtype != np.uint8:
+        img = img.astype(np.uint8)
+
+    return np.ascontiguousarray(img)
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    return b"".join([
+        struct.pack(">I", len(data)),
+        chunk_type,
+        data,
+        struct.pack(">I", zlib.crc32(chunk_type + data) & 0xFFFFFFFF),
+    ])
+
+
+def _require_numpy() -> Any:
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise RuntimeError("NumPy is required for non-Pillow inputs.") from exc
+
+    return np
 
 
 def _isinstance(obj: Any, module: str, clsname: str) -> bool:
@@ -104,9 +154,14 @@ def _isinstance(obj: Any, module: str, clsname: str) -> bool:
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Display images in Kitty terminal")
+    parser = argparse.ArgumentParser(prog="ktcat", description="Display images in Kitty terminal")
     parser.add_argument("files", nargs="+", help="Image files to display")
     args = parser.parse_args()
+
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("Pillow is required for the file-based CLI.") from exc
 
     for file in args.files:
         with Image.open(file) as img:

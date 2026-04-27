@@ -10,11 +10,12 @@ Display images in a Kitty-compatible terminal.
 
 ## Development
 
-- Activate the project environment first: `workon register`
+- Create or update the project environment with `make sync`.
 - Format: `make format`
 - Lint/typecheck: `make lint`
-- Run tests: `pytest tests/test_ktcat.py -q`
+- Run tests: `make test`
 
 ## Notes
 
 - The package uses a `src` layout; `src/ktcat/__main__.py` forwards `python -m ktcat` to the same `main()` entrypoint used by the installed `ktcat` console script.
+- The published package has no required runtime dependencies. NumPy, Pillow, and Torch support are optional; this repo keeps them in the `dev` dependency group for tests.

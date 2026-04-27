@@ -3,16 +3,20 @@ dependencies = []
 description = "Add your description here"
 name = "ktcat"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 version = "0.1.0"
 
 [project.scripts]
 ktcat = "ktcat:main"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "mypy >= 1.20",
-    "ruff >= 0.15.0",
+    "mypy>=1.20",
+    "numpy>=2.3.4",
+    "pillow>=12.0.0",
+    "pytest>=9.0.1",
+    "ruff>=0.15.0",
+    "torch>=2.9.0",
 ]
 
 [build-system]
@@ -26,7 +30,7 @@ check_untyped_defs = true
 extra_checks = true
 ignore_missing_imports = true
 no_implicit_optional = true
-python_version = "3.13"
+python_version = "3.12"
 strict_equality = true
 warn_redundant_casts = true
 warn_unreachable = true
@@ -36,7 +40,7 @@ warn_unused_ignores = true
 indent-width = 4
 line-length = 120
 preview = true
-target-version = "py313"
+target-version = "py312"
 
 [tool.ruff.lint]
 ignore = ["B028", "B905", "C408", "E203", "SIM102", "SIM108"]
