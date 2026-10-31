@@ -1,12 +1,13 @@
 import base64
 from io import BytesIO
+from typing import Any
 
 import numpy as np
 import pytest
 import torch
 from PIL import Image
 
-from ktcat import _normalize_array, ktcat
+from ktcat import ktcat
 
 
 def _png_from_kitty_output(output: str) -> bytes:
@@ -25,63 +26,40 @@ def _image_from_output(output: str) -> Image.Image:
     return Image.open(BytesIO(_png_from_kitty_output(output)))
 
 
-def test_ktcat_numpy_hwc_outputs_png(capsys: pytest.CaptureFixture[str]) -> None:
-    img = np.zeros((10, 12, 3), dtype=np.uint8)
-
+@pytest.mark.parametrize(
+    ("img", "mode"),
+    [
+        (np.zeros((10, 12), dtype=np.uint8), "L"),
+        (np.zeros((10, 12, 3), dtype=np.uint8), "RGB"),
+        (np.zeros((3, 10, 12), dtype=np.uint8), "RGB"),
+        (np.zeros((10, 12, 4), dtype=np.uint8), "RGBA"),
+        (torch.zeros((10, 12, 3), requires_grad=True), "RGB"),
+        (Image.new("RGB", (12, 10), color="red"), "RGB"),
+    ],
+    ids=["numpy-gray", "numpy-hwc", "numpy-chw", "numpy-rgba", "torch-hwc", "pil"],
+)
+def test_ktcat_outputs_png(img: Any, mode: str, capsys: pytest.CaptureFixture[str]) -> None:
     ktcat(img)
 
     with _image_from_output(capsys.readouterr().out) as out:
         assert out.format == "PNG"
-        assert out.mode == "RGB"
+        assert out.mode == mode
         assert out.size == (12, 10)
 
 
-def test_ktcat_numpy_chw_outputs_png(capsys: pytest.CaptureFixture[str]) -> None:
-    img = np.zeros((3, 10, 12), dtype=np.uint8)
-
+@pytest.mark.parametrize(
+    ("img", "expected"),
+    [
+        (np.array([[-1.0, 0.5, 2.0]], dtype=np.float32), [[0, 127, 255]]),
+        (np.array([[-1, 0, 255, 256]], dtype=np.int16), [[0, 0, 255, 255]]),
+    ],
+    ids=["float-scaled", "int-not-wrapped"],
+)
+def test_values_are_clipped(img: Any, expected: list[list[int]], capsys: pytest.CaptureFixture[str]) -> None:
     ktcat(img)
 
     with _image_from_output(capsys.readouterr().out) as out:
-        assert out.mode == "RGB"
-        assert out.size == (12, 10)
-
-
-def test_ktcat_torch_hwc_outputs_png(capsys: pytest.CaptureFixture[str]) -> None:
-    img = torch.zeros((10, 12, 3))
-
-    ktcat(img)
-
-    with _image_from_output(capsys.readouterr().out) as out:
-        assert out.mode == "RGB"
-        assert out.size == (12, 10)
-
-
-def test_ktcat_pil_outputs_png(capsys: pytest.CaptureFixture[str]) -> None:
-    img = Image.new("RGB", (12, 10), color="red")
-
-    ktcat(img)
-
-    with _image_from_output(capsys.readouterr().out) as out:
-        assert out.mode == "RGB"
-        assert out.size == (12, 10)
-
-
-def test_float_values_are_clipped_and_scaled() -> None:
-    img = np.array([[-1.0, 0.5, 2.0]], dtype=np.float32)
-
-    normalized = _normalize_array(img)
-
-    assert normalized.dtype == np.uint8
-    assert normalized.tolist() == [[0, 127, 255]]
-
-
-def test_integer_values_are_clipped_not_wrapped() -> None:
-    img = np.array([[-1, 0, 255, 256]], dtype=np.int16)
-
-    normalized = _normalize_array(img)
-
-    assert normalized.dtype == np.uint8
-    assert normalized.tolist() == [[0, 0, 255, 255]]
+        assert np.array(out).tolist() == expected
 
 
 def test_large_output_is_split_into_kitty_chunks(capsys: pytest.CaptureFixture[str]) -> None:

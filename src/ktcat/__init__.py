@@ -42,87 +42,55 @@ def _write_kitty_png(png_bytes: bytes) -> None:
 def _to_png_bytes(data: Any) -> bytes:
     """Converts supported image inputs into PNG bytes."""
 
-    # If Pillow is available and the input is already a PIL image, let Pillow encode it.
+    # If the input is already a PIL image, let Pillow encode it.
     if _isinstance(data, "PIL.Image", "Image"):
         with BytesIO() as buf:
             data.save(buf, format="PNG")
             return buf.getvalue()
 
+    import numpy as np
+
     img = _to_array(data)
-
-    if img.ndim == 2:
-        color_type = 0
-    else:
-        channel_count = img.shape[2]
-        if channel_count == 3:
-            color_type = 2
-        elif channel_count == 4:
-            color_type = 6
-        else:
-            raise ValueError(f"Unsupported channel count: {channel_count}. Expected 3 or 4.")
-
-    img = _normalize_array(img)
     height, width = img.shape[:2]
+    channels = 1 if img.ndim == 2 else img.shape[2]
+    color_types = {1: 0, 3: 2, 4: 6}  # grayscale, RGB, RGBA
+    if channels not in color_types:
+        raise ValueError(f"Unsupported channel count: {channels}. Expected 1, 3, or 4.")
 
     # PNG scanlines are prefixed with a filter byte. We always use filter type 0.
-    scanlines = BytesIO()
-    row_view = img.reshape(height, -1)
-    for row in row_view:
-        scanlines.write(b"\x00")
-        scanlines.write(row.tobytes())
-    raw = scanlines.getvalue()
+    raw = np.pad(img.reshape(height, -1), ((0, 0), (1, 0))).tobytes()
 
     return b"".join([
         b"\x89PNG\r\n\x1a\n",
-        _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)),
+        _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_types[channels], 0, 0, 0)),
         _png_chunk(b"IDAT", zlib.compress(raw)),
         _png_chunk(b"IEND", b""),
     ])
 
 
 def _to_array(data: Any) -> Any:
-    """Converts supported image formats to a numpy array."""
-    np = _require_numpy()
-
-    if _isinstance(data, "PIL.Image", "Image"):
-        return np.array(data)
+    """Converts supported inputs to a uint8 numpy array shaped [H, W] or [H, W, C]."""
+    import numpy as np
 
     if _isinstance(data, "torch", "Tensor"):
         data = data.detach().cpu().numpy()
 
-    if not isinstance(data, np.ndarray) and hasattr(data, "__array__"):
-        data = np.array(data)
+    img = np.asarray(data)
+    if img.ndim not in (2, 3):
+        raise ValueError(f"Unsupported array shape: {img.shape}. Expected 2D or 3D.")
 
-    if isinstance(data, np.ndarray):
-        img = data
-        if img.ndim == 2:
-            # Grayscale [H, W]
-            pass
-        elif img.ndim == 3:
-            if img.shape[0] in (1, 3, 4) and img.shape[2] not in (1, 3, 4):
-                img = np.transpose(img, (1, 2, 0))
-
-            if img.shape[2] == 1:
-                img = img.squeeze(2)
-        else:
-            raise ValueError(f"Unsupported array shape: {img.shape}. Expected 2D or 3D.")
-
-        return img
-
-    raise TypeError(f"Unsupported image type: {type(data)}")
-
-
-def _normalize_array(img: Any) -> Any:
-    np = _require_numpy()
+    if img.ndim == 3:
+        if img.shape[0] in (1, 3, 4) and img.shape[2] not in (1, 3, 4):
+            img = np.transpose(img, (1, 2, 0))
+        if img.shape[2] == 1:
+            img = img.squeeze(2)
 
     if img.dtype.kind == "f":
-        img = np.clip(img, 0, 1)
-        img = (img * 255).astype(np.uint8)
+        img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
     elif img.dtype != np.uint8:
-        img = np.clip(img, 0, 255)
-        img = img.astype(np.uint8)
+        img = np.clip(img, 0, 255).astype(np.uint8)
 
-    return np.ascontiguousarray(img)
+    return img
 
 
 def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
@@ -134,37 +102,20 @@ def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
     ])
 
 
-def _require_numpy() -> Any:
-    try:
-        import numpy as np
-    except ImportError as exc:
-        raise RuntimeError("NumPy is required for non-Pillow inputs.") from exc
-
-    return np
-
-
 def _isinstance(obj: Any, module: str, clsname: str) -> bool:
     """A helper that works like isinstance(obj, module:clsname), even if module is not imported."""
-    if module not in sys.modules:
-        return False
-    try:
-        clstype = getattr(sys.modules[module], clsname)
-        return isinstance(obj, clstype)
-    except AttributeError:
-        return False
+    cls = getattr(sys.modules.get(module), clsname, None)
+    return cls is not None and isinstance(obj, cls)
 
 
 def main() -> None:
     import argparse
 
+    from PIL import Image
+
     parser = argparse.ArgumentParser(prog="ktcat", description="Display images in Kitty terminal")
     parser.add_argument("files", nargs="+", help="Image files to display")
     args = parser.parse_args()
-
-    try:
-        from PIL import Image
-    except ImportError as exc:
-        raise RuntimeError("Pillow is required for the file-based CLI.") from exc
 
     for file in args.files:
         with Image.open(file) as img:
