@@ -19,4 +19,4 @@ lint:
 	$(uv) run mypy $(python_files)
 
 test:
-	$(uv) run pytest tests/test_ktcat.py -q
+	$(uv) run pytest -q
